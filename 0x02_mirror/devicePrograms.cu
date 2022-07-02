@@ -62,6 +62,7 @@ extern "C" __global__ void __closesthit__radiance()
 	const vec3f &B = sbtData.vertex[index.y];
 	const vec3f &C = sbtData.vertex[index.z];
 	vec3f Ng = cross(B - A, C - A);
+	// 使用法向量插值法.
 	vec3f Ns = (sbtData.normal)
 				? ((1.f - u - v) * sbtData.normal[index.x] + u * sbtData.normal[index.y] + v * sbtData.normal[index.z])
 				: Ng;
@@ -87,9 +88,11 @@ extern "C" __global__ void __closesthit__radiance()
 	const vec3f InterPos = OriPos + optixGetRayTmax() * rayDir;
 
 	prd.origin = InterPos;
+	// 下一次计算使用镜面反射到其他几何体.
 	prd.direction = rayDir - 2.f * dot(rayDir, Ns) * Ns;
 	prd.direction = normalize(prd.direction);
 
+	// 随机从光源所在区域进行采样，检查光源是否能照射到当前点，多次采样取平均值.
 	const int numLightSamples = NUM_LIGHT_SAMPLES;
 	for (int lightSampleID = 0; lightSampleID < numLightSamples; lightSampleID++)
 	{
@@ -107,15 +110,16 @@ extern "C" __global__ void __closesthit__radiance()
 			optixTrace(optixLaunchParams.traversable,
 						surfPos + 1e-3f * Ns,
 						lightDir,
-						1e-3f,					  // tmin
-						lightDist * (1.f - 1e-3f), // tmax
-						0.0f,					  // rayTime
+						1e-3f,
+						lightDist * (1.f - 1e-3f),
+						0.0f,
 						OptixVisibilityMask(LIGHT_MASK),
 						OPTIX_RAY_FLAG_DISABLE_ANYHIT | OPTIX_RAY_FLAG_TERMINATE_ON_FIRST_HIT | OPTIX_RAY_FLAG_DISABLE_CLOSESTHIT,
-						SHADOW_RAY_TYPE, // SBT offset
-						RAY_TYPE_COUNT,	// SBT stride
-						SHADOW_RAY_TYPE, // missSBTIndex
+						SHADOW_RAY_TYPE,
+						RAY_TYPE_COUNT,
+						SHADOW_RAY_TYPE,
 						u0, u1);
+			// NdotL:根据光源照到平面的角度进行衰减；lightDist光源照到平面的亮度随距离的平方衰减.
 			pixelColor += lightVisibility * optixLaunchParams.light.power * diffuseColor * (NdotL / (lightDist * lightDist * numLightSamples));
 		}
 	}
@@ -133,6 +137,7 @@ extern "C" __global__ void __anyhit__shadow()
 
 extern "C" __global__ void __miss__radiance()
 {
+	// 没有碰到任何几何体，显示背景黑色.
 	PRD &prd = *getPRD<PRD>();
 	prd.pixelColor = vec3f(0.f);
 	prd.done = true;
@@ -140,6 +145,7 @@ extern "C" __global__ void __miss__radiance()
 
 extern "C" __global__ void __miss__shadow()
 {
+	// 检查与光源时，发现没有碰到任何几何体（即光源能照到），返回光源颜色.
 	vec3f &prd = *(vec3f *)getPRD<vec3f>();
 	prd = vec3f(0.3f);
 }
@@ -151,54 +157,48 @@ extern "C" __global__ void __raygen__renderFrame()
 	const int accumID = optixLaunchParams.frame.accumID;
 	const auto &camera = optixLaunchParams.camera;
 
-	int numPixelSamples = NUM_PIXEL_SAMPLES;
-
 	vec3f pixelColor = 0.f;
-	for (int sampleID = 0; sampleID < numPixelSamples; sampleID++)
-	{
-		PRD prd;
-		prd.random.init(ix + accumID * optixLaunchParams.frame.size.x,
-						iy + accumID * optixLaunchParams.frame.size.y);
-		prd.pixelColor = vec3f(0.f);
-		prd.done = false;
-		prd.origin = camera.direction;
+	PRD prd;
+	prd.pixelColor = vec3f(0.f);
+	prd.done = false;
+	prd.origin = camera.direction;
 
-		uint32_t u0, u1;
-		packPointer(&prd, u0, u1);
+	uint32_t u0, u1;
+	packPointer(&prd, u0, u1);
 
-		const vec2f screen(vec2f(ix + prd.random(), iy + prd.random()) / vec2f(optixLaunchParams.frame.size));
+	const vec2f screen(vec2f(ix + prd.random(), iy + prd.random()) / vec2f(optixLaunchParams.frame.size));
 
-		vec3f rayDir = normalize(camera.direction + (screen.x - 0.5f) * camera.horizontal + (screen.y - 0.5f) * camera.vertical);
-		prd.direction = rayDir;
+	vec3f rayDir = normalize(camera.direction + (screen.x - 0.5f) * camera.horizontal + (screen.y - 0.5f) * camera.vertical);
+	prd.direction = rayDir;
 
-		vec3f ray_ori = camera.position;
-		vec3f ray_dir = rayDir;
-		int depth = 0;
-		for( ;; ){
-			optixTrace(optixLaunchParams.traversable,
-					ray_ori,
-					ray_dir,
-					0.01f,	  // tmin
-					1e16f, // tmax
-					0.0f,  // rayTime
-					OptixVisibilityMask(LIGHT_MASK),
-					OPTIX_RAY_FLAG_DISABLE_ANYHIT, // OPTIX_RAY_FLAG_NONE,
-					RADIANCE_RAY_TYPE,			  // SBT offset
-					RAY_TYPE_COUNT,				  // SBT stride
-					RADIANCE_RAY_TYPE,			  // missSBTIndex
-					u0, u1);
-			pixelColor += prd.pixelColor;
-			if(prd.done || depth >= 10)
-				break;
-			ray_ori = prd.origin;
-			ray_dir = prd.direction;
-			++depth;
-		}
+	vec3f ray_ori = camera.position;
+	vec3f ray_dir = rayDir;
+	int depth = 0;
+	// 在几何体之间进行多次反射.
+	for( ;; ){
+		optixTrace(optixLaunchParams.traversable,
+				ray_ori,
+				ray_dir,
+				0.01f,
+				1e16f,
+				0.0f,
+				OptixVisibilityMask(LIGHT_MASK),
+				OPTIX_RAY_FLAG_DISABLE_ANYHIT,
+				RADIANCE_RAY_TYPE,
+				RAY_TYPE_COUNT,
+				RADIANCE_RAY_TYPE,
+				u0, u1);
+		pixelColor += prd.pixelColor;
+		if(prd.done || depth >= 10)
+			break;
+		ray_ori = prd.origin;
+		ray_dir = prd.direction;
+		++depth;
 	}
 
-	const int r = int(255.99f * min(pixelColor.x / numPixelSamples, 1.f));
-	const int g = int(255.99f * min(pixelColor.y / numPixelSamples, 1.f));
-	const int b = int(255.99f * min(pixelColor.z / numPixelSamples, 1.f));
+	const int r = int(255.99f * min(pixelColor.x, 1.f));
+	const int g = int(255.99f * min(pixelColor.y, 1.f));
+	const int b = int(255.99f * min(pixelColor.z, 1.f));
 
 	const uint32_t rgba = 0xff000000 | (r << 0) | (g << 8) | (b << 16);
 

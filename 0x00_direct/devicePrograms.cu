@@ -44,20 +44,17 @@ extern "C" __global__ void __closesthit__radiance()
 	const vec3f &B = sbtData.vertex[index.y];
 	const vec3f &C = sbtData.vertex[index.z];
 	vec3f Ng = cross(B - A, C - A);
+	// 使用法向量插值法.
 	vec3f Ns = (sbtData.normal)
 					? ((1.f - u - v) * sbtData.normal[index.x] + u * sbtData.normal[index.y] + v * sbtData.normal[index.z])
 					: Ng;
 
 	const vec3f rayDir = optixGetWorldRayDirection();
 
-	if (dot(rayDir, Ng) > 0.f)
-		Ng = -Ng;
 	Ng = normalize(Ng);
-
-	if (dot(Ng, Ns) < 0.f)
-		Ns -= 2.f * dot(Ng, Ns) * Ng;
 	Ns = normalize(Ns);
 
+	// 读取材质或者颜色.
 	vec3f diffuseColor = sbtData.color;
 	if (sbtData.hasTexture && sbtData.texcoord)
 	{
@@ -67,6 +64,7 @@ extern "C" __global__ void __closesthit__radiance()
 		diffuseColor *= (vec3f)fromTexture;
 	}
 
+	// 利用Trac检查该点是否能被光源照到.
 	const vec3f surfPos = (1.f - u - v) * sbtData.vertex[index.x] + u * sbtData.vertex[index.y] + v * sbtData.vertex[index.z];
 	const vec3f lightPos(0.0f, 1.98f, 0.0f);
 	const vec3f lightDir = lightPos - surfPos;
@@ -76,18 +74,19 @@ extern "C" __global__ void __closesthit__radiance()
 	uint32_t u0, u1;
 	packPointer(&lightVisibility, u0, u1);
 	optixTrace(optixLaunchParams.traversable,
-				surfPos + 1e-3f * Ng,
+				surfPos + 1e-3f * Ns,
 				lightDir,
-				1e-3f,		// tmin
-				1.f - 1e-3f, // tmax
-				0.0f,		// rayTime
+				1e-3f,
+				1.f - 1e-3f,
+				0.0f,
 				OptixVisibilityMask(255),
 				OPTIX_RAY_FLAG_DISABLE_ANYHIT | OPTIX_RAY_FLAG_TERMINATE_ON_FIRST_HIT | OPTIX_RAY_FLAG_DISABLE_CLOSESTHIT,
-				SHADOW_RAY_TYPE, // SBT offset
-				RAY_TYPE_COUNT,	// SBT stride
-				SHADOW_RAY_TYPE, // missSBTIndex
+				SHADOW_RAY_TYPE,
+				RAY_TYPE_COUNT,
+				SHADOW_RAY_TYPE,
 				u0, u1);
 
+	// 根据光线照到平面的角度来计算衰减，垂直设想平面最亮，斜着射入较弱.
 	const float cosDN = 0.1f + .8f * fabsf(dot(rayDir, Ns));
 
 	vec3f &prd = *(vec3f *)getPRD<vec3f>();
@@ -104,12 +103,14 @@ extern "C" __global__ void __anyhit__shadow()
 
 extern "C" __global__ void __miss__radiance()
 {
+	// 没有碰到任何几何体，显示背景黑色.
 	vec3f &prd = *(vec3f *)getPRD<vec3f>();
 	prd = vec3f(0.f);
 }
 
 extern "C" __global__ void __miss__shadow()
 {
+	// 检查与光源时，发现没有碰到任何几何体（即光源能照到），返回光源颜色（白色）.
 	vec3f &prd = *(vec3f *)getPRD<vec3f>();
 	prd = vec3f(1.f);
 }
@@ -128,19 +129,20 @@ extern "C" __global__ void __raygen__renderFrame()
 
 	const vec2f screen(vec2f(ix + .5f, iy + .5f) / vec2f(optixLaunchParams.frame.size));
 
+	// 根据摄像机计算光线发出的方向.
 	vec3f rayDir = normalize(camera.direction + (screen.x - 0.5f) * camera.horizontal + (screen.y - 0.5f) * camera.vertical);
 	
 	optixTrace(optixLaunchParams.traversable,
 				camera.position,
 				rayDir,
-				0.f,	  // tmin
-				1e20f, // tmax
-				0.0f,  // rayTime
+				0.f,
+				1e20f,
+				0.0f,
 				OptixVisibilityMask(255),
-				OPTIX_RAY_FLAG_DISABLE_ANYHIT, // OPTIX_RAY_FLAG_NONE,
-				RADIANCE_RAY_TYPE,			  // SBT offset
-				RAY_TYPE_COUNT,				  // SBT stride
-				RADIANCE_RAY_TYPE,			  // missSBTIndex
+				OPTIX_RAY_FLAG_DISABLE_ANYHIT,
+				RADIANCE_RAY_TYPE,
+				RAY_TYPE_COUNT,
+				RADIANCE_RAY_TYPE,
 				u0, u1);
 
 	const int r = int(255.99f * pixelColorPRD.x);
