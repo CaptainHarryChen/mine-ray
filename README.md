@@ -38,25 +38,25 @@
 
 显示顶部光源对物体造成的阴影效果
 
-![0x00_direct](png\0x00_direct.png)
+![0x00_direct](png/0x00_direct.png)
 
 ### 0x01_soft 漫反射
 
 设置每一个面为模糊材质，显示顶部光源对物体形成模糊的阴影效果
 
-![0x01_soft](png\0x01_soft.png)
+![0x01_soft](png/0x01_soft.png)
 
 ### 0x02_mirror 镜面反射
 
 显示平面镜全反射和球面镜全反射的效果
 
-![0x02_mirror](png\0x02_mirror.png)
+![0x02_mirror](png/0x02_mirror.png)
 
 ### 0x03_refraction 折射
 
 实现水面折射，玻璃球折射形成的凸透镜效果，以及带颜色的折射
 
-![0x03_refraction](png\0x03_refraction.png)
+![0x03_refraction](png/0x03_refraction.png)
 
 ## 文件说明
 
@@ -91,3 +91,4 @@
 3. **Model.h/Model.cpp**: 模型读取类，使用tinyobj读取模型，存储在Model类
 4. **optix7.h**: OptiX相关头文件以及宏
 5. **OptixRenderer.h/OptixRenderer.cpp**:  OptiX渲染类，将CPU与OptiX交接的功能类。包含初始化OptiX环境，构建流水线，传输参数等功能。
+
